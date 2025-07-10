@@ -33,7 +33,7 @@ def run():
             'buffer_scale1': 0.3, 
             'buffer_scale2': 0.5, 
             'detection_threshold':0.2, 
-            'max_age': 60})
+            'max_age': 30})
 
         for i,frame_number in enumerate(np.unique(gt_dets_file[:,0])):
             gt_dets, dets = gt_dets_file[gt_dets_file[:,0] == frame_number][:, 1:6], detections[int(frame_number)][:, :5]
