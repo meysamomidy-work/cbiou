@@ -1,12 +1,12 @@
 import numpy as np
 import textwrap
 
-STATE_UNCONFIRMED = 0
+STATE_DELETED = 0
 STATE_NEW = 1
 STATE_TRACKING = 2
 STATE_LOST = 3
-STATE_DELETED = 4
-STATE_NAMES = ['UNCONFIRMED', 'NEW', 'TRACKING', 'LOST', 'DELETED']
+
+STATE_NAMES = ['DELETED', 'NEW', 'TRACKING', 'LOST', ]
 
 class Track:
     INSTANCES:list["Track"] = []
@@ -14,6 +14,14 @@ class Track:
     MIN_FRAMES_TO_PREDICT = 5
     ID_COUNTER = 0
     FRAME_NUMBER = 0
+
+    @staticmethod
+    def init(max_age, min_frames_to_predict):
+        Track.INSTANCES = []
+        Track.ID_COUNTER = 0
+        Track.FRAME_NUMBER = 0
+        Track.MAX_AGE = max_age
+        Track.MIN_FRAMES_TO_PREDICT = min_frames_to_predict
 
     @staticmethod
     def alive_tracks() -> list["Track"]:
@@ -43,12 +51,12 @@ class Track:
             bbox       -> {self.bbox}
             age        -> {self.age}
             score      -> {self.score}
-            {f'last state -> {STATE_NAMES[self.last_state_before_deletion]}' if self.state == STATE_DELETED else ''}
+            {f'last state -> {self.last_state_name}' if self.state in [STATE_DELETED, STATE_LOST] else ''}
             """).strip()
     
     @property
     def compressed_format(self):
-        return f"{STATE_NAMES[self.state]}    {self.id}    {self.bbox}    {self.age}    {self.score}    {STATE_NAMES[self.last_state_before_deletion] if self.state == STATE_DELETED else ''}"
+        return f"{STATE_NAMES[self.state]}    {self.id}    {self.bbox}    {self.age}    {self.score}    {self.last_state_name if self.state in [STATE_DELETED, STATE_LOST] else ''}"
 
     @property
     def score(self):
@@ -60,6 +68,13 @@ class Track:
     @property    
     def state_name(self):
         return STATE_NAMES[self.state]
+    
+    @property
+    def last_state_name(self):
+        if self.last_state != None:
+            return STATE_NAMES[self.last_state]
+        else:
+            return 'None'
 
     @property
     def tlbr(self):
@@ -75,18 +90,16 @@ class Track:
     def valid(self):
         if self.age > Track.MAX_AGE:
             return False
-        if self.state in [STATE_UNCONFIRMED, STATE_NEW] and self.age >= 2:
-            return False
         if np.any(np.isnan(self.bbox)) or np.any(self.bbox[2:] <= 0):
             return False
         return True
 
     def __init__(self, bbox, score, state=None):
         if state == None:
-            self.state = STATE_UNCONFIRMED
+            self.state = STATE_NEW
         else:
             self.state = state
-        self.last_state_before_deletion = None
+        self.last_state = None
         self.bbox = np.array(bbox).copy()
         self.predict_history = []
         self.update_history = [np.array(bbox).copy()]
@@ -102,12 +115,13 @@ class Track:
     def predict(self):
         self.age += 1
         if not self.valid:
-            self.last_state_before_deletion = self.state
+            self.last_state = self.last_state or self.state
             self.state = STATE_DELETED
             return
-        if self.state == STATE_TRACKING and self.age >= 2:
+        if self.state in [STATE_TRACKING, STATE_NEW] and self.age >= 2:
+            self.last_state = self.state
             self.state = STATE_LOST
-        if self.state in [STATE_TRACKING, STATE_LOST]:
+        if STATE_TRACKING in [self.state, self.last_state]:
             delta = (self.update_history[-1] - self.update_history[-Track.MIN_FRAMES_TO_PREDICT]) / (Track.MIN_FRAMES_TO_PREDICT - 1)
             new_bbox = self.predict_history[-1] + delta
             self.predict_history.append(new_bbox)
@@ -121,7 +135,6 @@ class Track:
         if self.state == STATE_NEW and len(self.update_history) >= Track.MIN_FRAMES_TO_PREDICT:
             self.predict_history = self.update_history.copy()
             self.state = STATE_TRACKING
-        if self.state == STATE_UNCONFIRMED:
-            self.state = STATE_NEW
         if self.state == STATE_LOST:
-            self.state = STATE_TRACKING
+            self.state = self.last_state
+        self.last_state = None
